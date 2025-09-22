@@ -16,7 +16,9 @@ public class Proyectile : NetworkBehaviour
     }
     private void OnTriggerEnter(Collider other)
     {
-        if(other.gameObject.CompareTag("Player"))
+        if (!IsServer) return;
+
+        if (other.gameObject.CompareTag("Player"))
             SimpleDespawn();
     }
 }

@@ -1,11 +1,15 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Unity.Netcode;
+using UnityEditor.PackageManager;
 using UnityEngine;
 
 public class GameManager : NetworkBehaviour
 {
     public GameObject playerPrefab;
+    public GameObject buffPrefab;
+
     public static GameManager Instance;
     public Dictionary<string, PlayerData> playerStateByAccountID = new();
 
@@ -24,7 +28,10 @@ public class GameManager : NetworkBehaviour
     public override void OnNetworkSpawn()
     {
         if (IsServer)
+        {
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleDisconnect;
+            StartCoroutine(SpawnBuffs());
+        }
 
         OnConnection?.Invoke();
     }
@@ -54,8 +61,25 @@ public class GameManager : NetworkBehaviour
     public void SpawnPlayerServer(ulong ID, PlayerData data)
     {
         if (!IsServer) return;
-        GameObject player = Instantiate(playerPrefab);
+
+        if (NetworkManager.Singleton.ConnectedClients.TryGetValue(ID, out var client))
+        {
+            if (client.PlayerObject != null) 
+                return;
+        }
+        GameObject player = Instantiate(playerPrefab, data.position, Quaternion.identity);
         player.GetComponent<NetworkObject>().SpawnAsPlayerObject(ID, true);
         player.GetComponent<Player>().SetData(data);
+    }
+    IEnumerator SpawnBuffs()
+    {
+        while (true)
+        {
+            Vector3 newPos = new Vector3(UnityEngine.Random.Range(-8f, 8f), 0f, UnityEngine.Random.Range(-8f, 8f));
+            GameObject buff = Instantiate(buffPrefab, newPos, Quaternion.identity);
+            buff.GetComponent<NetworkObject>().Spawn();
+
+            yield return new WaitForSeconds(10f);
+        }
     }
 }

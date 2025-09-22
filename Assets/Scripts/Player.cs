@@ -8,7 +8,7 @@ public class Player : NetworkBehaviour
     public NetworkVariable<int> health = new();
     public NetworkVariable<int> attack = new();
 
-    public float speed = 5;
+    public float speed = 5f;
 
     public GameObject projectilePrefab;
     public Transform firePoint;
@@ -20,34 +20,58 @@ public class Player : NetworkBehaviour
         attack.Value = playerData.attack;
         transform.position = playerData.position;
     }
+
+    private void Start()
+    {
+        if (IsOwner)
+        {
+            CameraFollow cam = Camera.main.GetComponent<CameraFollow>();
+            if (cam != null)
+            {
+                cam.SetTarget(transform);
+            }
+        }
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        if (IsOwner && IsClient && !IsServer)
+        {
+            RegisterWithServer();
+        }
+    }
+
+    void RegisterWithServer()
+    {
+        string myAccountID = "Player_" + OwnerClientId;
+        GameManager.Instance.RegisterPlayerServerRpc(myAccountID, OwnerClientId);
+    }
+
     public override void OnNetworkDespawn()
     {
         GameManager.Instance.playerStateByAccountID[accountID.Value.ToString()] = new PlayerData(accountID.ToString(), transform.position, health.Value, attack.Value);
-        print("Jugador se ha desconectado: " + NetworkManager.Singleton.LocalClientId + ", y se ha guardado la data de: " + accountID.Value);
+        Debug.Log("Jugador se ha desconectado: " + NetworkManager.Singleton.LocalClientId + ", data guardada: " + accountID.Value);
     }
-    public void Update()
+
+    private void Update()
     {
         if (!IsOwner) return;
 
-        if (Input.GetAxisRaw("Horizontal") != 0 || Input.GetAxisRaw("Vertical") != 0)
-        {
-            float VelX = Input.GetAxisRaw("Horizontal") * speed * Time.deltaTime;
-            float VelY = Input.GetAxisRaw("Vertical") * speed * Time.deltaTime;
-            transform.position += new Vector3(VelX, 0, VelY);
-        }
+        float moveX = Input.GetAxisRaw("Horizontal") * speed * Time.deltaTime;
+        float moveZ = Input.GetAxisRaw("Vertical") * speed * Time.deltaTime;
+        transform.position += new Vector3(moveX, 0, moveZ);
 
         RotatePlayerTowardsMovement();
 
         if (Input.GetMouseButtonDown(0))
         {
-            ShootRpc();
+            ShootServerRpc();
         }
     }
 
-    public void RotatePlayerTowardsMovement()
+    private void RotatePlayerTowardsMovement()
     {
         Vector3 moveDirection = new Vector3(Input.GetAxisRaw("Horizontal"), 0, Input.GetAxisRaw("Vertical"));
-
         if (moveDirection.magnitude > 0.1f)
         {
             Quaternion targetRotation = Quaternion.LookRotation(moveDirection);
@@ -55,26 +79,65 @@ public class Player : NetworkBehaviour
         }
     }
 
-
-    [Rpc(SendTo.Server)]
-    public void ShootRpc()
+    [ServerRpc]
+    public void ShootServerRpc()
     {
         Vector3 direction = firePoint.transform.forward;
         GameObject proj = Instantiate(projectilePrefab, firePoint.position, Quaternion.identity);
-
         proj.GetComponent<NetworkObject>().Spawn(true);
-        proj.GetComponent<Rigidbody>().AddForce(direction * 5, ForceMode.Impulse);
-
+        proj.GetComponent<Rigidbody>().AddForce(direction * 5f, ForceMode.Impulse);
     }
+
     private void OnTriggerEnter(Collider other)
     {
         if (other.gameObject.CompareTag("Bullet"))
         {
-            health.Value -= 1;
-            Debug.Log("Vida del jugador: " + health.Value);
+            TakeDamageServerRpc(attack.Value);
         }
     }
+
+    [ServerRpc(RequireOwnership = false)]
+    public void TakeDamageServerRpc(int amount)
+    {
+        health.Value -= amount;
+        ShowHealthClientRpc(health.Value);
+
+        if (health.Value <= 0)
+        {
+            PlayerRespawnRpc();
+        }
+    }
+
+    [Rpc(SendTo.Server)]
+    public void PlayerRespawnRpc()
+    {
+        Vector3 randomPosition = new Vector3(Random.Range(-10f, 10f), 0, Random.Range(-10f, 10f));
+        transform.position = randomPosition;
+        RestoreHealthServerRpc();
+    }
+    [ServerRpc(RequireOwnership = false)]
+    public void RestoreHealthServerRpc()
+    {
+        health.Value = 100;
+        ShowHealthClientRpc(health.Value);
+    }
+    [ClientRpc]
+    public void ShowHealthClientRpc(int currentHealth)
+    {
+        if (IsOwner)
+        {
+            Debug.Log("Vida del jugador: " + currentHealth);
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    public void IncreaseAttackServerRpc(int amount)
+    {
+        attack.Value += amount;
+        Debug.Log("Ataque aumentado a: " + attack.Value);
+    }
 }
+
 public class PlayerData
 {
     public string accountID;
